@@ -25,4 +25,4 @@ This work is under a [Creative Commons Attribution 4.0 International License](ht
 
 ### Communication
 
-We would appreciate if you write any comments, questions or suggestions to pablodeloscobos@gmail.com
+We would appreciate if you write any comments, questions or suggestions to pablodeloscobos (gmail)
