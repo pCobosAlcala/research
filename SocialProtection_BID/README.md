@@ -1,4 +1,4 @@
-#Inventario y caracterización de los programas de apoyo al ingreso en América Latina y el Caribe frente a COVID-19
+# Inventario y caracterización de los programas de apoyo al ingreso en América Latina y el Caribe frente a COVID-19
 
 Repository of databases and code analysis of the document "Inventario y caracterización de los programas de apoyo al ingreso en América Latina y el Caribe frente a COVID-19".
 
