@@ -21,3 +21,8 @@ This repository has two folders with the following content:
 
 ### License
 This work is under a [Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/).
+
+
+### Communication
+
+We would appreciate if you write any comments, questions or suggestions to pablodeloscobos@gmail.com
