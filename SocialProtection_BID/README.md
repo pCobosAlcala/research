@@ -9,7 +9,7 @@ Repository of databases and code analysis of the document "Inventario y caracter
 This repository has two folders with the following content:
 
 - **1_data**:
-	- An excel file (base.xlsx) with three sheets:
+	- An excel file (db.xlsx) with three sheets:
 		- i) new or expanded social protection programs in response to the pandemic in Latin America and the Caribbean with their characteristics (responses_covid)
 		- ii) data about the countries of Latin America and the Caribbean (countries)
 		- iii) methodological considerations on the non-inclusion of certain answers (other_considerations)
