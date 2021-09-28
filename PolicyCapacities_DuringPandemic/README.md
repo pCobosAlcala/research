@@ -10,7 +10,7 @@ This repository has two folders with the following content:
 		- i) new or expanded social protection programs in response to the pandemic in Latin America and the Caribbean with their characteristics (responses_covid)
 		- ii) methodological considerations on the non-inclusion of certain answers (other_considerations)
     		- iii) data about the countries of Latin America and the Caribbean (countries)
-		- iv) data about the oldest-ongoing cash transfer program in the studied LAC countries (ctp)
+		- iv) data about the oldest ongoing cash transfer program in the studied LAC countries (ctp)
 
 	- A folder (data_dictionary) with two excel files:
 		- i) catalogue
