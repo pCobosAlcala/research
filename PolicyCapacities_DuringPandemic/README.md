@@ -21,6 +21,8 @@ This repository has two folders with the following content:
 ### License
 This work is under a [Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/).
 
+### Note
+The same documents can be found [here](https://zenodo.org/record/5533030#.YVJm0LhKg2w).
 
 ### Communication
 
