@@ -1,4 +1,4 @@
-# Repository of databases and code analysis of the document "Using Policy Capacities During the Pandemic: Cash Transfer Programs in Latin America and the Caribbean"
+# Repository of databases and code analysis of the document "Using Policy Capacities During the Pandemic: A Comparative Analysis of Cash Transfer Programs in Latin America and the Caribbean"
 
 ## About this repository
 
@@ -9,7 +9,7 @@ This repository has two folders with the following content:
 	- An excel file (db.xlsx) with four sheets:
 		- i) new or expanded social protection programs in response to the pandemic in Latin America and the Caribbean with their characteristics (responses_covid)
 		- ii) methodological considerations on the non-inclusion of certain answers (other_considerations)
-    - iii) data about the countries of Latin America and the Caribbean (countries)
+    		- iii) data about the countries of Latin America and the Caribbean (countries)
 		- iv) data about the oldest-ongoing cash transfer program in the studied LAC countries (ctp)
 
 	- A folder (data_dictionary) with two excel files:
