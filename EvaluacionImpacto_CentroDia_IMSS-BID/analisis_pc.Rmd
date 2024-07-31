@@ -1,0 +1,2852 @@
+---
+title: "Evaluación de impacto del Centro de Día del IMSS: Personas mayores"
+author: "Guillermo M. Cejudo, Cynthia Michel, y Pablo de los Cobos"
+date: "2024"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r include = FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r include=FALSE}
+pacman::p_load(scales, lubridate, stargazer, ggtext, lme4, ri2, tidyverse, ggalluvial)
+```
+
+```{r include=FALSE}
+Sys.setlocale("LC_ALL", "es_ES.UTF-8") # Cambiar locale para prevenir problemas con caracteres especiales
+
+# Sys.setlocale("LC_ALL", "Spanish_Mexico.1252") # Windows
+options(scipen=999) # Prevenir notación científica
+
+rm(list = ls()) # Eliminar objetos guardados
+
+# Tipo de letra en gráficas 
+windowsFonts(A = windowsFont("Roboto Condensed"))
+
+### Preparando datos----
+date_today <-  Sys.Date() 
+```
+
+```{r include=FALSE}
+# Bases PM
+pc <- read_csv("C://Users/pablo/OneDrive/Documentos/pablo/RStudio/2023/imss/imss/1_data/bases/base_final/pc_vf.csv") %>% 
+  rename(var = name,
+         aleatorizado = t,
+         t = seleccionado) %>%
+  mutate(t = as.character(t)) %>% 
+  select(-...1) %>%
+  pivot_longer(c(t0:t2)) %>%
+  mutate(time = case_when(name == "t0" ~ "0",
+                          name == "t1" ~ "1",
+                          name == "t2" ~ "2",
+                          T ~ "99")) %>%
+  mutate(T1 = as.character(T1)) %>%
+  mutate(T2 = as.character(T2))
+
+dupla <- readxl::read_excel("C://Users/pablo/OneDrive/Documentos/pablo/RStudio/2023/imss/imss/1_data/bases/base_final/db_dupla.xlsx", 
+                         sheet = "PC") %>% 
+  janitor::clean_names() %>% 
+    mutate(x2 = case_when(x2 == 2 ~ 3,
+                        x2 == 1 ~ 2,
+                        T ~ 1)) %>% 
+  filter(x2 != 3) %>% 
+  rename(x06_01 = x06_01_cual_es_el_numero_de_folio_codigo_de_nombre_de_persona_mayor_cuidada) %>% 
+  select(x06_01, x2) 
+
+pc = pc %>%
+  select(-x2) %>% 
+  left_join(dupla, by = "x06_01") %>% 
+  filter(!is.na(x2))
+```
+
+# Especificación
+
+$$Y_{it} = \beta_0 + \beta_1tiempo_t + \beta_2CD_i + \beta_3(tiempo_t*CD_i) + \varepsilon_{it}$$
+$$Y_{it} = \beta_0 + \beta_1tiempo_t + \beta_2CD_i + \beta_3(tiempo_t*CD_i) + \beta_4X_i + \varepsilon_{it}$$
+
+## Población de estudio
+
+```{r}
+db = pc %>% 
+  count(x06_01, aleatorizado, time, T1, T2) %>% 
+  rename(t = aleatorizado) %>% 
+  count(x06_01, t, T1, T2) %>% 
+  # count(t, T1, T2)
+  mutate(T1 = case_when(
+    t == "1" & T1 == "0" ~ NA_character_,
+    T ~ T1
+  )) %>% 
+  mutate(T2 = case_when(
+    t == "1" & T2 == "0" ~ NA_character_,
+    T ~ T2
+  )) %>% 
+  mutate(t = case_when(
+    is.na(t) ~ 0,
+    T ~ t
+  )) %>% 
+  mutate(t = case_when(
+    x06_01 == "PM092" ~ 1,
+    T ~ t
+  )) %>% 
+    mutate(t = case_when(
+    x06_01 == "PM017" ~ 1,
+    x06_01 == "PM101" ~ 1,
+    T ~ t
+  )) %>% 
+  # select(-t) %>% %>% 
+  count(t, T1, T2) %>% 
+  mutate(n_ = 1:nrow(.)) %>% 
+  # mutate(n_ = 1:nrow(.)) %>% 
+  mutate(t = as.character(t)) %>% 
+  pivot_longer(c(t,T1,T2)) %>% 
+  mutate(value = case_when(
+    value == "0" ~ "Lista de espera",
+    value == "1" ~ "Centro de Día",
+    is.na(value) ~ "Atrición"
+  )) %>% 
+  pivot_wider(names_from = "name",
+              values_from = "value") 
+```
+
+Las PC que participaron en este proyecto piloto son un total de `r sum(db$n)`. De este total, `r sum(db$n[db$t == "Centro de Día"])` comenzaron a asitir al CD en la medición de línea base, de las que `r sum(db$n[db$T1 == "Centro de Día"])`  se mantuvieron en el CD y se obtuvo información en la medición de medio plazo, y `r sum(db$n[db$T2 == "Centro de Día"])` en la medición de largo plazo.
+
+Por su parte, del total de PC, `r sum(db$n[db$t == "Lista de espera"])` estaban en la LE en la medición de línea base, de las que de `r sum(db$n[db$T1 == "Lista de espera"])` se obtuvo información en la medición de medio plazo, y de `r sum(db$n[db$T2 == "Lista de espera"])` en la medición de largo plazo.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6}
+db %>% 
+  ggplot(aes(axis1 = t,
+           axis2 = T1,
+           axis3 =T2,
+           y = n)) + 
+  geom_alluvium(aes(fill =  T2), aes.bind = "alluvia", alpha = 0.8) +
+  geom_stratum(color = "grey0",
+               fill = "transparent",
+               size = 1, 
+               alpha = 0) +
+  geom_label(aes(label = after_stat(count)),
+             stat = "stratum",
+           # label.strata = T,
+           infer.label = T,
+           size = 2.4,
+           alpha = 0.5,
+           check_overlap = T) +
+  scale_x_continuous(breaks = 1:3, labels = c("Línea\nbase",
+                                              "Medio\nplazo",
+                                              "Largo\nplazo"),
+                     position = "top") +
+  scale_fill_manual(values = c("grey40", "#27564b", "salmon")) +
+  theme_minimal() +
+  labs(y = "",
+       fill = "") + 
+  theme(axis.text.y = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = "top")
+```
+
+# Características personales
+## Descripción de características clásicas
+```{r}
+# Adecuación de base
+db = pc %>% 
+  select(-id) %>% 
+  filter(time == "0") %>% 
+  pivot_wider(values_from = "value",
+              names_from = "var") %>%
+  mutate(x04_01 = replace_na(x04_01, as.Date("1900-01-01"))) %>% 
+  mutate(x04_01 = lubridate::ymd(x04_01)) %>% 
+  mutate(x04_01 = eeptools::age_calc(x04_01,
+                                       date_today,
+                                       units = "years")) %>% 
+  mutate(x04_01 = case_when(x04_01 > 120 ~ NA_integer_,
+                              T ~ x04_01)) %>% 
+  mutate(x04_01_ = floor(x04_01)) %>% 
+  mutate(x04_02 = case_when(x04_02 == "Mujer" ~ 0,
+                            T ~ 1)) %>% 
+  mutate(x04_03 = case_when(x04_03 == "Sí" ~ 1,
+                            T ~ 0)) %>% 
+  mutate(x09_01 = as.numeric(x09_01)) %>% 
+  mutate(x04_08_ = case_when(x04_08 == "Ninguno" ~ 1,
+                             x04_08 == "Preescolar o kínder" ~ 2,
+                             x04_08 == "Primaria" ~ 3,
+                             x04_08 == "Secundaria" ~ 4,
+                             x04_08 == "Estudios técnicos con secundaria terminada" ~ 5,
+                             x04_08 == "Preparatoria o bachillerato" ~ 6,
+                             x04_08 == "Normal básica" ~ 7,
+                             x04_08 == "Estudios técnicos con preparatoria terminada" ~ 8,
+                             x04_08 == "Licenciatura o ingeniería (profesional)" ~ 9,
+                             x04_08 == "Maestría o doctorado" ~ 10,
+                             T ~ NA_integer_)) %>% 
+  # filter(x04_08 == 999)
+  mutate(x04_09 = case_when(x04_09 == "No" ~ 0,
+                            T ~ 1)) %>% 
+  mutate(x06_02 = case_when(x06_02 == "Sí" ~ 1,
+                            T ~ 0)) %>% 
+  mutate(x52_02 = case_when(x52_02 == "Sí" ~ 1,
+                            T ~ 0)) %>% 
+  mutate(x53_01 = as.numeric(x53_01)) %>% 
+  mutate(x53_01 = case_when(is.na(x53_01) ~ 0,
+                            T ~ x53_01)) %>% 
+  mutate(x06_03 = case_when(
+    x06_03 == "AMISTAD DE 22 AÑOS"  ~ "Sin parentesco",
+    x06_03 == "AMISTAD DE 22 AÑOS"~ "Sin parentesco",
+    x06_03 == "TIA"  ~ "Tía/o",
+    x06_03 == "HERMANA" ~ "Hermana",
+    x06_03 == "Hija/o"  ~ "Padre o madre",
+    x06_03 == "Sin parentezco"  ~ "Sin parentesco",
+    T ~ x06_03
+  )) %>% 
+  mutate(x06_03_ = case_when(
+    x06_03 == "Padre o madre" ~ 1,
+    T ~ 0
+  ))
+
+```
+
+```{r}
+demo00 = db %>% 
+  select(x06_01, x04_01, x04_02, x04_03, x06_03, x06_03_, x09_01, x04_08, x04_08_, x04_09, x04_06, x06_02, value_previos1,value_previos2, mean_previos1, mean_previos2, value_3, value_9) 
+```
+
+```{r}
+base01 = db %>% 
+  select(x06_01, t, time, x04_01, x04_02, x04_03, x06_03, x06_03_, x09_01, x04_08, x04_08_, x04_09, x04_06, x06_02)
+```
+
+### Edad
+La edad promedio de todas las PC estudiadas es de `r round(mean(db$x04_01), 1)`, con una desviación estándar de `r round(sd(db$x04_01), 1)`. El grupo de quienes sus familiares acuden al CD tiene una media de `r round(mean(db$x04_01[db$t==1],na.rm=T), 1)`, mientras que el grupo de quienes están en la LE tiene una media de `r round(mean(db$x04_01[db$t==0],na.rm=T), 1)`.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6, warning = F}
+db %>% 
+  rename(var = x04_01) %>% 
+  ggplot(aes(x = var,
+             y = factor(t))) +
+  geom_boxplot(fill = "transparent",
+               color = "#27564b") + 
+  geom_violin(fill = "transparent",
+              color = "#27564b") +
+  labs(y = NULL, 
+       x = "\nEdad") +
+  scale_y_discrete(labels = c("Lista de espera", "PC admitidas")) +
+  theme_light() +
+  theme(axis.title = element_text(size = 10, face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        plot.caption = element_markdown(hjust = 0),
+        text = element_text(family = "A")) 
+
+```
+
+### Género
+La proporción de mujeres en todas las PC estudiadas es de `r percent(mean(db$x04_02), 1)`, con una desviación estándar de `r round(sd(db$x04_02), 1)`. El grupo de quienes sus familiares acuden al CD tiene una proporción de `r percent(mean(db$x04_02[db$t==1],na.rm=T), .1)`, mientras que el grupo de quienes están en la LE tiene una proporción de `r percent(mean(db$x04_02[db$t==0],na.rm=T), .1)`.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6, warning = F}
+db %>% 
+  rename(var = x04_02) %>% 
+  group_by(t) %>% 
+  summarise(mean = mean(var)) %>% 
+  ungroup() %>% 
+  mutate(mean = 1-mean)  %>% 
+  ggplot(aes(x = mean,
+             y = factor(t))) + 
+  geom_col(fill = "#27564b") +
+  geom_text(aes(label = percent(mean, accuracy = .1)),
+            hjust = 2, fontface = "bold", color = "white") +
+  scale_x_continuous(label = percent) + 
+  theme_minimal() +
+  labs(y = NULL,
+       x = "\n% mujeres") +
+  scale_y_discrete(labels = c("Lista de espera", "PC admitidas")) +
+  theme_light() +
+  theme(axis.title = element_text(size = 10, face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        plot.caption = element_markdown(hjust = 0),
+        text = element_text(family = "A")) 
+```
+
+### Autoadscripción indígena
+La proporción de personas con autoadscripción indígena en todas las PC estudiadas es de `r percent(mean(db$x04_03), 1)`, con una desviación estándar de `r round(sd(db$x04_03), 1)`. El grupo de quienes sus familiares acuden al CD tiene una proporción de `r percent(mean(db$x04_03[db$t==1],na.rm=T), .1)`, mientras que el grupo de quienes están en la LE tiene una proporción de `r percent(mean(db$x04_03[db$t==0],na.rm=T), .1)`.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6, warning = F}
+db %>% 
+  rename(var = x04_03) %>% 
+  group_by(t) %>% 
+  summarise(mean = mean(var)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = mean,
+             y = factor(t))) + 
+  geom_col(fill = "#27564b") +
+  geom_text(aes(label = percent(mean, accuracy = .1)),
+            hjust = 2, fontface = "bold", color = "white") +
+  scale_x_continuous(label = percent) + 
+  theme_minimal() +
+  labs(y = NULL,
+       x = "\n% indígenas") +
+  scale_y_discrete(labels = c("Lista de espera", "PC admitidas")) +
+  theme_light() +
+  theme(axis.title = element_text(size = 10, face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        plot.caption = element_markdown(hjust = 0),
+        text = element_text(family = "A")) 
+```
+
+### Personas en el hogar
+El promedio de personas en el hogar de todas las PC estudiadas es de `r round(mean(db$x09_01), 1)`, con una desviación estándar de `r round(sd(db$x09_01), 1)`. El grupo de quienes sus familiares acuden al CD tiene una media de `r round(mean(db$x09_01[db$t==1],na.rm=T), 1)`, mientras que el grupo de quienes están en la LE tiene una media de `r round(mean(db$x09_01[db$t==0],na.rm=T), 1)`.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6, warning = F}
+db %>% 
+  rename(var = x09_01) %>% 
+  ggplot(aes(x = var,
+             y = factor(t))) +
+  geom_boxplot(fill = "transparent",
+               color = "#27564b") + 
+  geom_violin(fill = "transparent",
+              color = "#27564b") +
+  labs(y = NULL, 
+       x = "\nIntegrantes en el hogar") +
+  scale_x_continuous(breaks = c(seq(0, 8, 2))) + 
+  scale_y_discrete(labels = c("Lista de espera", "PC admitidas")) +
+  theme_light() +
+  theme(axis.title = element_text(size = 10, face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        plot.caption = element_markdown(hjust = 0),
+        text = element_text(family = "A")) 
+
+```
+
+### Educación
+```{r echo=FALSE, fig.height = 3, fig.width = 6, warning = F}
+db %>% 
+  count(x04_08, x04_08_, t ) %>% 
+  filter(!is.na(x04_08)) %>% 
+  group_by(t) %>% 
+  mutate(total = sum(n)) %>% 
+  ungroup() %>% 
+  mutate() %>% 
+  mutate(var = n/total) %>% 
+  mutate(t = case_when(t == "1" ~ "PC admitidas",
+                       t == "0" ~ "Lista de espera",
+                       T ~ "Otro")) %>% 
+  ggplot(aes(x = var,
+             y = fct_reorder(x04_08, x04_08_))) + 
+  geom_col(fill = "#27564b") +
+  facet_grid(~t) +
+  geom_text(aes(label = percent(var, accuracy = .1)),
+            hjust = -.1, fontface = "bold", color = "grey0", size = 2.2) +
+  scale_x_continuous(label = percent, limits = c(0, .7)) + 
+  theme_minimal() +
+  labs(y = NULL,
+       x = "\nÚltimo grado de estudios") +
+  theme_light() +
+  theme(axis.title = element_text(size = 10, face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        plot.caption = element_markdown(hjust = 0),
+        text = element_text(family = "A"),
+        strip.text.x = element_text(size = 8, face = "bold",
+                                    color = "grey0")) 
+```
+
+### Estado civil
+```{r echo=FALSE, fig.height = 3, fig.width = 6, warning = F}
+db %>% 
+  count(x04_06, t ) %>% 
+  filter(!is.na(x04_06)) %>% 
+  group_by(t) %>% 
+  mutate(total = sum(n)) %>% 
+  ungroup() %>% 
+  mutate() %>% 
+  mutate(var = n/total) %>% 
+  mutate(t = case_when(t == "1" ~ "PC admitidas",
+                       t == "0" ~ "Lista de espera",
+                       T ~ "Otro")) %>% 
+  ggplot(aes(x = var,
+             y = x04_06)) + 
+  geom_col(fill = "#27564b") +
+  facet_grid(~t) +
+  geom_text(aes(label = percent(var, accuracy = .1)),
+            hjust = -.1, fontface = "bold", color = "grey0", size = 2.5) +
+  scale_x_continuous(label = percent, limits = c(0, .8)) + 
+  theme_minimal() +
+  labs(y = NULL,
+       x = "\nEstado civil") +
+  theme_light() +
+  theme(axis.title = element_text(size = 10, face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        plot.caption = element_markdown(hjust = 0),
+        text = element_text(family = "A"),
+        strip.text.x = element_text(size = 8, face = "bold",
+                                    color = "grey0")) 
+```
+
+### Derechohabiencia IMSS
+La proporción de derechohabiencia en el IMSS en todas las PC estudiadas es de `r percent(mean(db$x04_09), 1)`, con una desviación estándar de `r round(sd(db$x04_09), 1)`. El grupo de quienes sus familiares acuden al CD tiene una proporción de `r percent(mean(db$x04_09[db$t==1],na.rm=T), .1)`, mientras que el grupo de quienes están en la LE tiene una proporción de `r percent(mean(db$x04_09[db$t==0],na.rm=T), .1)`.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6, warning = F}
+db %>% 
+  rename(var = x04_09) %>% 
+  group_by(t) %>% 
+  summarise(mean = mean(var)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = mean,
+             y = factor(t))) + 
+  geom_col(fill = "#27564b") +
+  geom_text(aes(label = percent(mean, accuracy = .1)),
+            hjust = 2, fontface = "bold", color = "white") +
+  scale_x_continuous(label = percent) + 
+  theme_minimal() +
+  labs(y = NULL,
+       x = "\n% derechohabiencia IMSS") +
+  scale_y_discrete(labels = c("Lista de espera", "PC admitidas")) +
+  theme_light() +
+  theme(axis.title = element_text(size = 10, face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        plot.caption = element_markdown(hjust = 0),
+        text = element_text(family = "A")) 
+```
+
+### Vive con PM
+La proporción de de todas las PC estudiadas que viven con la PM cuidada es de `r percent(mean(db$x06_02), 1)`, con una desviación estándar de `r round(sd(db$x06_02), 1)`. El grupo de quienes sus familiares acuden al CD tiene una proporción de `r percent(mean(db$x06_02[db$t==1],na.rm=T), .1)`, mientras que el grupo de quienes están en la LE tiene una proporción de `r percent(mean(db$x06_02[db$t==0],na.rm=T), .1)`.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6, warning = F}
+db %>% 
+  rename(var = x06_02) %>% 
+  group_by(t) %>% 
+  summarise(mean = mean(var)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = mean,
+             y = factor(t))) + 
+  geom_col(fill = "#27564b") +
+  geom_text(aes(label = percent(mean, accuracy = .1)),
+            hjust = 2, fontface = "bold", color = "white") +
+  scale_x_continuous(label = percent) + 
+  theme_minimal() +
+  labs(y = NULL,
+       x = "\n% vive con PM") +
+  scale_y_discrete(labels = c("Lista de espera", "PC admitidas")) +
+  theme_light() +
+  theme(axis.title = element_text(size = 10, face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        plot.caption = element_markdown(hjust = 0),
+        text = element_text(family = "A")) 
+```
+
+### Parentesco
+```{r echo=FALSE, fig.height = 3, fig.width = 6, warning = F}
+db %>% 
+  count(x06_03, t)  %>% 
+  group_by(t) %>% 
+  mutate(total = sum(n, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(var = n/total) %>% 
+  mutate(t = case_when(t == "1" ~ "PC admitidas",
+                       t == "0" ~ "Lista de espera",
+                       T ~ "Otro")) %>% 
+  ggplot(aes(y = x06_03,
+             x = var)) + 
+  geom_col(fill = "#27564b") +
+  facet_grid(~t) +
+  geom_text(aes(label = percent(var, accuracy = .1)),
+            hjust = -.1, fontface = "bold", color = "grey0", size = 2.5) +
+  scale_x_continuous(label = percent, limits = c(0, 1)) + 
+  theme_minimal() +
+  labs(y = NULL,
+       x = "\nParentesco") +
+  theme_light() +
+  theme(axis.title = element_text(size = 10, face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        plot.caption = element_markdown(hjust = 0),
+        text = element_text(family = "A"),
+        strip.text.x = element_text(size = 8, face = "bold",
+                                    color = "grey0"))
+```
+
+```{r, include = F}
+# Regresiones en objetos
+lm1 <- lm(x04_01 ~ t, data = db) # edad exacta
+lm2 <- lm(x04_01_ ~ t, data = db) # edad
+lm3 <- lm(x04_02 ~ t, data = db) # género
+lm4 <- lm(x04_03 ~ t, data = db) # indígena
+lm5 <- lm(x09_01 ~ t, data = db) # personas en el hogar
+lm6 <- lm(x04_09 ~ t, data = db) # derechohabiencia
+lm8 <- lm(x04_08_ ~ t, data = db) # 
+lm13 <- lm(x06_02 ~ t, data = db) # Vive con PM 
+lm14 <- lm(x06_03_ ~ t, data = db) # Parentesco
+```
+
+
+```{r warning=FALSE, word_table, message=FALSE, comment = ''}
+# Resultados de regresiones
+stargazer(model.numbers = F,
+            notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Constante"),
+          dep.var.caption = "Variables",
+          lm1, lm2, lm3,
+          type = "text",
+          dep.var.labels = c("Edad exacta", "Edad simple", "Género"),
+          align = TRUE,
+          no.space = TRUE)
+
+
+stargazer(notes.label = "Nota",
+          model.numbers = F,
+          covariate.labels = c("Tratamiento","Constante"),
+          dep.var.caption = "Variables",
+          lm4, lm5, lm6,
+          type = "text",
+          dep.var.labels = c("Indígenas", "# hogar", "Derechohabiencia"),
+          align = TRUE,
+          no.space = TRUE)
+
+stargazer(notes.label = "Nota",
+          model.numbers = F,
+          covariate.labels = c("Tratamiento","Constante"),
+          dep.var.caption = "Variables",
+          lm8, lm13, lm14,
+          type = "text",
+          dep.var.labels = c("Educación", "Vive con PM", "Parentesco (P/M)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+## Descripción de características de control sobre cuidados
+
+### Porcentaje de personas que requieren cuidados en el hogar
+```{r, include = F}
+db = pc %>% 
+  select(-id) %>% 
+  filter(time == 0) %>% 
+  pivot_wider(values_from = "value",
+              names_from = "var") %>% 
+  filter(time == 0) %>% 
+  mutate(x06_02 = case_when(x06_02 == "Sí" ~ 1,
+                            T ~ 0)) %>% 
+  mutate(x09_01 = as.numeric(x09_01)) %>% 
+  select(x06_01, t, x06_02, x09_01, x10_01, x19_01, x28_01, x35_01, x42_01) %>% 
+  pivot_longer(c(x10_01:x42_01)) %>% 
+  mutate(value = as.numeric(value)) %>% 
+  group_by(x06_01, t, x06_02, x09_01) %>% 
+  summarise(value = sum(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(value = value+x06_02,
+         x09_01 = x09_01+x06_02) %>% 
+  # mutate(a = x09_01 >= value ) %>% 
+  # count(a)
+  mutate(demanda1 = value/x09_01) %>% 
+  select(x06_01, t, demanda1)
+```
+
+La variable de personas que requieren cuidados es operacionalizada a partir de la división del número de personas que requieren cuidados entre el número de integrantes totales en un hogar. En todas las PC estudiadas, este porcentaje es de `r percent(mean(db$demanda1), 1)`, con una desviación estándar de `r round(sd(db$demanda1), 1)`. El grupo de quienes sus familiares acuden al CD tiene un porcentaje de `r percent(mean(db$demanda1[db$t==1],na.rm=T), .1)`, mientras que el grupo de quienes están en la LE tiene un porcentaje de `r percent(mean(db$demanda1[db$t==0],na.rm=T), .1)`.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6, warning = F}
+db %>% 
+  rename(var = demanda1) %>% 
+  group_by(t) %>% 
+  summarise(mean = mean(var)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = mean,
+             y = factor(t))) + 
+  geom_col(fill = "#27564b") +
+  geom_text(aes(label = percent(mean, accuracy = .1)),
+            hjust = 2, fontface = "bold", color = "white") +
+  scale_x_continuous(label = percent) + 
+  theme_minimal() +
+  labs(y = NULL,
+       x = "\n% de necesidad de cuidado en el hogar") +
+  scale_y_discrete(labels = c("Lista de espera", "PC admitidas")) +
+  theme_light() +
+  theme(axis.title = element_text(size = 10, face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        plot.caption = element_markdown(hjust = 0),
+        text = element_text(family = "A")) 
+```
+
+```{r}
+base01 = db %>% 
+  select(-t) %>% 
+  right_join(base01, by = "x06_01")
+
+demo00 = db %>% 
+  select(-t) %>% 
+  right_join(demo00, by = "x06_01")
+```
+
+
+### Asistencia a lugares de cuidados
+```{r warning=FALSE, include = F}
+### Asistencia a lugares de cuidados
+pc_1 = pc %>%
+  select(-id) %>% 
+  filter(time == 0) %>%
+  pivot_wider(values_from = "value",
+              names_from = "var")
+```
+
+```{r warning=FALSE, include = F}
+a1 = pc_1 %>%
+  select(x06_01, x11_06, x12_06, x13_06, x14_06, x15_06, x16_06, x17_06, x18_06) %>%
+  pivot_longer(-x06_01) %>%
+  mutate(value = case_when(
+    value == "Sí" ~ 1,
+    value == "No" ~ 0,
+    T ~ 99
+  )) %>%
+  count(x06_01, value) %>%
+  pivot_wider(values_from = "n",
+              names_from = "value") %>%
+  janitor::clean_names() %>%
+  mutate(x1 = case_when(is.na(x1) ~ 0, T ~ x1)) %>%
+  mutate(x0 = case_when(
+    is.na(x0) ~ 0,
+    T ~ x0
+  )) %>%
+  select(-x99) %>%
+  mutate(x09 = -x1+x0) %>%
+  select(-x1,-x0)
+
+a2 = pc_1 %>% 
+  select(x06_01, x20_06, x21_06, x22_06, x23_06, x24_06, x25_06, x26_06, x27_06) %>% 
+  pivot_longer(-x06_01) %>%
+  mutate(value = case_when(
+    value == "Sí" ~ 1,
+    value == "No" ~ 0,
+    T ~ 99
+  )) %>% 
+  count(x06_01, value) %>% 
+  pivot_wider(values_from = "n",
+              names_from = "value") %>% 
+  janitor::clean_names() %>% 
+  mutate(x1 = case_when(
+    is.na(x1) ~ 0,
+    T ~ x1
+  )) %>% 
+  mutate(x0 = case_when(
+    is.na(x0) ~ 0,
+    T ~ x0
+  )) %>% 
+  select(-x99) %>% 
+  mutate(x20 = -x1+x0) %>% 
+  select(-x1,-x0)
+
+a3 = pc_1 %>% 
+  select(x06_01, x29_05, x30_05, x31_05, x32_05, x33_05, x34_05) %>% 
+  pivot_longer(-x06_01) %>%
+  mutate(value = case_when(
+    value == "Sí" ~ 1,
+    value == "No" ~ 0,
+    T ~ 99
+  )) %>% 
+  count(x06_01, value) %>% 
+  pivot_wider(values_from = "n",
+              names_from = "value") %>% 
+  mutate(x1 = 0) %>% 
+  janitor::clean_names() %>% 
+  mutate(x1 = case_when(
+    is.na(x1) ~ 0,
+    T ~ x1
+  )) %>% 
+  mutate(x0 = case_when(
+    is.na(x0) ~ 0,
+    T ~ x0
+  )) %>% 
+  select(-x99) %>% 
+  mutate(x28 = -x1+x0) %>% 
+  select(-x1,-x0)
+
+a4 = pc_1 %>% 
+  select(x06_01, x36_05, x37_05, x38_05, x39_05, x40_05, x41_05) %>% 
+  pivot_longer(-x06_01) %>%
+  mutate(value = case_when(
+    value == "Sí" ~ 1,
+    value == "No" ~ 0,
+    T ~ 99
+  )) %>% 
+  count(x06_01, value) %>% 
+  pivot_wider(values_from = "n",
+              names_from = "value") %>% 
+  janitor::clean_names() %>% 
+  mutate(x1 = case_when(
+    is.na(x1) ~ 0,
+    T ~ x1
+  )) %>% 
+  mutate(x0 = case_when(
+    is.na(x0) ~ 0,
+    T ~ x0
+  )) %>% 
+  select(-x99) %>% 
+  mutate(x36 = -x1+x0) %>% 
+  select(-x1,-x0)
+
+a5 = pc_1 %>% 
+  select(x06_01, x43_05, x44_05, x45_05, x46_05, x47_05, x48_05, x49_05, x50_05) %>% 
+  pivot_longer(-x06_01) %>%
+  mutate(value = case_when(
+    value == "Sí" ~ 1,
+    value == "No" ~ 0,
+    T ~ 99
+  )) %>% 
+  count(x06_01, value) %>% 
+  pivot_wider(values_from = "n",
+              names_from = "value") %>% 
+  janitor::clean_names() %>% 
+  mutate(x1 = case_when(
+    is.na(x1) ~ 0,
+    T ~ x1
+  )) %>% 
+  mutate(x0 = case_when(
+    is.na(x0) ~ 0,
+    T ~ x0
+  )) %>% 
+  select(-x99) %>% 
+  mutate(x43 = -x1+x0) %>% 
+  select(-x1,-x0)
+
+db = a1 %>% 
+  left_join(a2, by = "x06_01") %>% 
+  left_join(a3, by = "x06_01") %>% 
+  left_join(a4, by = "x06_01") %>% 
+  left_join(a5, by = "x06_01") %>% 
+  pivot_longer(-x06_01)  %>% 
+  group_by(x06_01) %>% 
+  summarise(redistribucion1 = sum(value, na.rm = T)) %>% 
+  ungroup()
+
+db = pc %>% 
+  filter(time == 0) %>% 
+  count(x06_01, t) %>% 
+  select(-n) %>% 
+  left_join(db, by = "x06_01")
+```
+
+```{r}
+base01 = db %>% 
+  select(-t) %>% 
+  right_join(base01, by = "x06_01")
+
+demo00 = db %>% 
+  select(-t) %>% 
+  right_join(demo00, by = "x06_01")
+```
+
+La variable de asistencia a lugares de cuidados es operacionalizada a partir de la suma de personas que requieren cuidados (personas de 0 a 24 años, mayores de 60, y personas con discapacidad sin importar su edad) y que acuden a algún lugar en el que reciben este servicio. Entre todas las PC estudiadas, este indicador tiene un valor de `r round(mean(db$redistribucion1), 1)`, con una desviación estándar de `r round(sd(db$redistribucion1), 1)`. El grupo de quienes sus familiares acuden al CD tiene una media de `r round(mean(db$redistribucion1[db$t==1],na.rm=T), 1)`, mientras que el grupo de quienes están en la LE tiene una media de `r round(mean(db$redistribucion1[db$t==0],na.rm=T), 1)`.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6, warning = F}
+db %>% 
+  rename(var = redistribucion1) %>% 
+  ggplot(aes(x = var,
+             y = factor(t))) +
+  geom_boxplot(fill = "transparent",
+               color = "#27564b") + 
+  geom_violin(fill = "transparent",
+              color = "#27564b") +
+  labs(y = NULL, 
+       x = "\nIndicador de asistencia a lugares de cuidados") +
+  scale_y_discrete(labels = c("Lista de espera", "PC admitidas")) +
+  theme_light() +
+  theme(axis.title = element_text(size = 10, face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        plot.caption = element_markdown(hjust = 0),
+        text = element_text(family = "A")) 
+
+```
+
+### Personas trabajadoras del hogar
+```{r, include = F}
+db = pc_1 %>% 
+  select(x06_01, x55_01, x57_01, x59_01) %>% 
+  mutate(x55_01 = case_when(is.na(x55_01) ~ 0,
+                            T ~ as.numeric(x55_01))) %>% 
+  mutate(x57_01 = case_when(is.na(x57_01) ~ 0,
+                            T ~ as.numeric(x57_01))) %>% 
+  mutate(x59_01 = case_when(is.na(x59_01) ~ 0,
+                            T ~ as.numeric(x59_01))) %>% 
+  mutate(redistribucion3 = x55_01 + x57_01 + x59_01) %>% 
+  select(x06_01, redistribucion3) 
+
+db = pc %>% 
+  filter(time == 0) %>% 
+  count(x06_01, t) %>% 
+  select(-n) %>% 
+  left_join(db, by = "x06_01")
+```
+
+```{r}
+base01 = db %>% 
+  select(-t) %>% 
+  right_join(base01, by = "x06_01")
+
+demo00 = db %>% 
+  select(-t) %>% 
+  right_join(demo00, by = "x06_01")
+```
+
+La variable de personas trabajadoras del hogar es operacionalizada a partir de la suma de horas de trabajo semanal que realizan las personas trabajadoras del hogar contratadas en el hogar de la PC, en caso de ser contratadas. Entre todas las PC estudiadas, este indicador tiene un valor de `r round(mean(db$redistribucion3), 1)`, con una desviación estándar de `r round(sd(db$redistribucion3), 1)`. El grupo de quienes sus familiares acuden al CD tiene una media de `r round(mean(db$redistribucion3[db$t==1],na.rm=T), 1)`, mientras que el grupo de quienes están en la LE tiene una media de `r round(mean(db$redistribucion3[db$t==0],na.rm=T), 1)`.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6, warning = F}
+db %>% 
+  rename(var = redistribucion3) %>% 
+  ggplot(aes(x = var,
+             y = factor(t))) +
+  geom_boxplot(fill = "transparent",
+               color = "#27564b") + 
+  geom_violin(fill = "transparent",
+              color = "#27564b") +
+  labs(y = NULL, 
+       x = "\nIndicador de personas trabajadoras del hogar") +
+  scale_y_discrete(labels = c("Lista de espera", "PC admitidas")) +
+  theme_light() +
+  theme(axis.title = element_text(size = 10, face = "bold"),
+        axis.text.y = element_text(face = "bold"),
+        plot.caption = element_markdown(hjust = 0),
+        text = element_text(family = "A")) 
+
+```
+
+```{r comment = ''}
+# Regresiones en objetos
+lm1 <- lm(demanda1 ~ t, data = base01) # edad exacta
+lm2 <- lm(redistribucion1 ~ t, data = base01) # edad
+lm3 <- lm(redistribucion3 ~ t, data = base01) # género
+
+# Resultados de regresiones
+# stargazer(model.numbers = F,
+          #   notes.label = "Nota",
+          # covariate.labels = c("Tratamiento","Constante"),
+          # dep.var.caption = "Variables",
+          # lm1, lm2, lm3,
+          # type = "text",
+          # dep.var.labels = c("Necesidad\ncuidado", "Asist.\ncuidados", "Trab.\n hogar"),
+          # align = TRUE,
+          # no.space = TRUE)
+
+```
+
+```{r, include = F}
+# Zarit
+db = pc %>% 
+  select(-id) %>% 
+  pivot_wider(values_from = "value",
+              names_from = "var") %>% 
+  select(x06_01, T2, time, value_previos1, value_previos2, mean_previos1, mean_previos2, value_3, value_9, x51_01:x51_22) %>% 
+  pivot_longer(c("x51_01":"x51_22")) %>% 
+  mutate(value = case_when(
+    value == "Nunca" ~ 1,
+    value == "Casi nunca" ~ 2,
+    value == "A veces" ~ 3,
+    value == "Bastantes veces" ~ 4,
+    value == "Siempre" ~ 5,
+    T ~ NA_integer_
+  )) %>% 
+  group_by(x06_01, T2, time) %>% 
+  summarise(value = sum(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(var = "zarit") %>% 
+  rename(t = T2) %>% 
+  filter(!is.na(t)) 
+
+demo02 = db %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(id, var, value)
+
+base02 = db %>% 
+  group_by(t, var, time) %>% 
+  summarise(value = mean(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = "var",
+              values_from = "value") %>% 
+  mutate(id = paste(t, time, sep = "_")) %>% 
+  select(id, zarit)
+
+```
+
+```{r, include = F}
+# EBS-8
+db = pc %>% 
+  select(-id) %>% 
+  pivot_wider(values_from = "value",
+              names_from = "var") %>% 
+  select(x06_01, T2, time, x60_01:x60_08) %>% 
+  pivot_longer(c("x60_01":"x60_08")) %>% 
+  mutate(value = case_when(
+    value == "En desacuerdo" ~ 1,
+    value == "Ni de acuerdo, ni en desacuerdo" ~ 2,
+    value == "Ligeramente de acuerdo" ~ 3,
+    value == "De acuerdo" ~ 4,
+    value == "Muy de acuerdo" ~ 5,
+    value == "Bastante de acuerdo" ~ 6,
+    value == "Totalmente de acuerdo" ~ 7,
+    T ~ NA_integer_
+  )) %>%
+  group_by(x06_01, T2, time) %>% 
+  summarise(value = sum(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(value = value/56) %>% 
+  mutate(var = "ebs") %>% 
+  rename(t = T2) %>% 
+  filter(!is.na(t)) 
+
+demo03 = db %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(id, var, value)
+
+base03 = db %>% 
+  group_by(t, var, time) %>% 
+  summarise(value = mean(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = "var",
+              values_from = "value") %>% 
+  mutate(id = paste(t, time, sep = "_")) %>% 
+  select(id, ebs)
+```
+
+```{r, include = F}
+# CES-D
+db = pc %>% 
+  select(-id) %>% 
+  pivot_wider(values_from = "value",
+              names_from = "var") %>% 
+  mutate(x63_06 = case_when(
+    x63_06 == "Rara vez o nunca (menos de 1 día)" ~ "Todo el tiempo o la mayoría del tiempo (5-7 días)",
+    x63_06 == "Pocas veces o alguna vez (1-2 días)" ~ "Un número de veces considerable (3-4 días)",
+    x63_06 == "Un número de veces considerable (3-4 días)" ~ "Pocas veces o alguna vez (1-2 días)",
+    x63_06 == "Todo el tiempo o la mayoría del tiempo (5-7 días)" ~ "Rara vez o nunca (menos de 1 día)",
+    T ~ NA_character_)) %>% 
+  
+  select(x06_01, T2, time, x63_01:x63_07) %>% 
+  pivot_longer(c("x63_01":"x63_07")) %>% 
+  mutate(value = case_when(
+    value == "Rara vez o nunca (menos de 1 día)" ~ 0,
+    value == "Pocas veces o alguna vez (1-2 días)" ~ 1,
+    value == "Un número de veces considerable (3-4 días)" ~ 2,
+    value == "Todo el tiempo o la mayoría del tiempo (5-7 días)" ~ 3,
+    T ~ NA_integer_)) %>% 
+  # Lo de abajo se va porque personas contestaron sí y no
+  filter(x06_01 != "PM026") %>% 
+  filter(x06_01 != "PM039") %>% 
+  filter(x06_01 != "PM051") %>% 
+  filter(x06_01 != "PM075") %>% 
+  filter(x06_01 != "PM098") %>% 
+  filter(x06_01 != "PM115") %>% 
+  group_by(x06_01, T2, time) %>% 
+  summarise(value = sum(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(var = "cesd") %>% 
+  rename(t = T2) %>% 
+  filter(!is.na(t)) 
+
+demo04 = db %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(id, var, value)
+
+base04 = db %>% 
+  group_by(t, var, time) %>% 
+  summarise(value = mean(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = "var",
+              values_from = "value") %>% 
+  mutate(id = paste(t, time, sep = "_")) %>% 
+  select(id, cesd)
+```
+
+```{r, include = F}
+# CASE
+db = pc %>% 
+  select(-id) %>% 
+  pivot_wider(values_from = "value",
+              names_from = "var") %>% 
+  select(x06_01, T2, time, x64_01:x64_08) %>% 
+  pivot_longer(c("x64_01":"x64_08")) %>% 
+  mutate(value = case_when(
+    value == "Sí" ~ 1,
+    value == "No" ~ 0,
+    T ~ NA_integer_
+  )) %>% 
+  # Lo de abajo se va porque personas contestaron sí y no
+  filter(x06_01 != "PM026") %>% 
+  filter(x06_01 != "PM039") %>% 
+  filter(x06_01 != "PM051") %>% 
+  filter(x06_01 != "PM075") %>% 
+  filter(x06_01 != "PM115") %>% 
+  group_by(x06_01, T2, time) %>% 
+  summarise(value = sum(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(var = "case") %>% 
+  rename(t = T2) %>% 
+  filter(!is.na(t)) 
+
+demo05 = db %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(id, var, value)
+
+base05 = db %>% 
+  group_by(t, var, time) %>% 
+  summarise(value = mean(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = "var",
+              values_from = "value") %>% 
+  mutate(id = paste(t, time, sep = "_")) %>% 
+  select(id, case)
+```
+
+```{r, include = F}
+# x04_10: Ingresos propios
+db = pc %>% 
+  select(-id) %>% 
+  pivot_wider(values_from = "value",
+              names_from = "var") %>% 
+  select(x06_01, T2, time, x04_10) %>% 
+  pivot_longer(c("x04_10")) %>% 
+  mutate(value = case_when(value == "No" ~ 0,
+                           value == "Sí" ~ 1,
+                           T ~ NA_integer_)) %>% 
+  group_by(x06_01, T2, time) %>% 
+  summarise(value = sum(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(var = "x04_10") %>% 
+  rename(t = T2) %>% 
+  filter(!is.na(t)) 
+
+demo06 = db %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(id, var, value)
+
+base06 = db %>% 
+  group_by(t, var, time) %>% 
+  summarise(value = mean(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = "var",
+              values_from = "value") %>% 
+  mutate(id = paste(t, time, sep = "_")) %>% 
+  select(id, x04_10)
+```
+
+```{r, include = F}
+# x05_01: Nivel de ingresos
+db = pc %>% 
+  select(-id) %>% 
+  pivot_wider(values_from = "value",
+              names_from = "var") %>% 
+  select(x06_01, T2, time, x05_01) %>% 
+  pivot_longer(c("x05_01")) %>% 
+  mutate(value = case_when(
+    value == "De $1 a $1,844" ~ 1,
+    value == "De $1,845 a $5,255" ~ 2,
+    value == "De $5,256 a $6,534" ~ 3,
+    value == "Más de $6,534" ~ 4,
+    value == "Prefiero no decirlo" ~ NA_real_,
+    is.na(value) ~ 0,
+    T ~ NA_integer_
+  )) %>% 
+  group_by(x06_01, T2, time) %>% 
+  summarise(value = sum(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(var = "x05_01") %>% 
+  rename(t = T2) %>% 
+  filter(!is.na(t)) 
+
+demo07 = db %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(id, var, value)
+
+base07 = db %>% 
+  group_by(t, var, time) %>% 
+  summarise(value = mean(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = "var",
+              values_from = "value") %>% 
+  mutate(id = paste(t, time, sep = "_")) %>% 
+  select(id, x05_01)
+```
+
+```{r, include = F}
+# x52_02
+db = pc %>% 
+  select(-id) %>% 
+  pivot_wider(values_from = "value",
+              names_from = "var") %>% 
+  select(x06_01, T2, time, x52_02) %>% 
+  pivot_longer(c("x52_02")) %>% 
+  mutate(value = case_when(value == "No" ~ 0,
+                           value == "Sí" ~ 1,
+                          T ~ 1)) %>% 
+  group_by(x06_01, T2, time) %>% 
+  summarise(value = sum(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(var = "x52_02") %>% 
+  rename(t = T2) %>% 
+  filter(!is.na(t)) 
+
+demo08 = db %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(id, var, value)
+
+base08 = db %>% 
+  group_by(t, var, time) %>% 
+  summarise(value = mean(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = "var",
+              values_from = "value") %>% 
+  mutate(id = paste(t, time, sep = "_")) %>% 
+  select(id, x52_02)
+```
+
+```{r, include = F}
+# x53_01
+db = pc %>% 
+  select(-id) %>% 
+  pivot_wider(values_from = "value",
+              names_from = "var") %>% 
+  select(x06_01, T2, time, x53_01) %>% 
+  pivot_longer(c("x53_01")) %>% 
+  mutate(value = as.numeric(value)) %>% 
+  mutate(value = case_when(is.na(value) ~ 0,
+                            T ~ value)) %>% 
+  group_by(x06_01, T2, time) %>% 
+  summarise(value = sum(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(var = "x53_01") %>% 
+  rename(t = T2) %>% 
+  filter(!is.na(t)) 
+
+demo09 = db %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(id, var, value)
+
+base09 = db %>% 
+  group_by(t, var, time) %>% 
+  summarise(value = mean(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = "var",
+              values_from = "value") %>% 
+  mutate(id = paste(t, time, sep = "_")) %>% 
+  select(id, x53_01)
+```
+
+```{r message=FALSE}
+### Realización de actividades
+a1 = pc %>% 
+  select(-t) %>% 
+  rename(t = T2) %>% 
+  mutate(var = str_sub(var, 1, 6))  %>% 
+  filter(var %in% c("x11_09","x12_09","x13_09","x14_09","x15_09","x16_09","x17_09","x18_09")) %>% 
+  mutate(value = case_when(
+    value == "No" ~ 0,
+    value == "Sí, con apoyo de alguna otra persona" ~ 1,
+    value == "Sí, yo misma/o sin apoyo de alguna otra persona" ~ 1,
+    is.na(value) ~ 0,
+  )) %>%
+  group_by(x06_01, t, time) %>% 
+  summarise(x09_ = (sum(value))) %>% 
+  ungroup() %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_"))
+
+a2 = pc %>% 
+    select(-t) %>% 
+  rename(t = T2) %>% 
+  mutate(var = str_sub(var, 1, 6)) %>% 
+  filter(var %in% c("x20_08","x21_08","x22_08","x23_08","x24_08","x25_08","x26_08","x27_08")) %>% 
+  mutate(value = case_when(
+    value == "No" ~ 0,
+    value == "Sí, con apoyo de alguna otra persona" ~ 1,
+    value == "Sí, yo misma/o sin apoyo de alguna otra persona" ~ 1,
+    is.na(value) ~ 0,
+  )) %>%
+  group_by(x06_01, t, time) %>% 
+  summarise(x20_ = (sum(value))) %>% 
+  ungroup() %>%
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(4, 5)
+
+a3 = pc %>% 
+  select(-t) %>% 
+  rename(t = T2) %>% 
+  mutate(var = str_sub(var, 1, 6)) %>% 
+  filter(var %in% c("x29_08","x30_08","x31_08","x32_08","x33_08","x34_08")) %>% 
+  mutate(value = case_when(
+    value == "No" ~ 0,
+    value == "Sí, con apoyo de alguna otra persona" ~ 1,
+    value == "Sí, yo misma/o sin apoyo de alguna otra persona" ~ 1,
+    is.na(value) ~ 0,
+  )) %>%
+  group_by(x06_01, t, time) %>% 
+  summarise(x28_ = (sum(value))) %>% 
+  ungroup() %>%
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(4, 5)
+
+a4 = pc %>% 
+  select(-t) %>% 
+  rename(t = T2) %>% 
+  mutate(var = str_sub(var, 1, 6)) %>% 
+  filter(var %in% c("x36_08","x37_08","x38_08","x39_08","x40_08","x41_08")) %>% 
+  mutate(value = case_when(
+    value == "No" ~ 0,
+    value == "Sí, con apoyo de alguna otra persona" ~ 1,
+    value == "Sí, yo misma/o sin apoyo de alguna otra persona" ~ 1,
+    is.na(value) ~ 0,
+  )) %>%
+  group_by(x06_01, t, time) %>% 
+  summarise(x36_ = (sum(value))) %>% 
+  ungroup() %>%
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(4, 5)
+
+a5 = pc %>% 
+  select(-t) %>% 
+  rename(t = T2) %>% 
+  mutate(var = str_sub(var, 1, 6)) %>% 
+  filter(var %in% c("x06_04")) %>% 
+  mutate(value = case_when(
+    value == "No" ~ 0,
+    value == "Sí, con apoyo de alguna otra persona" ~ 1,
+    value == "Sí, yo misma/o sin apoyo de alguna otra persona" ~ 1,
+    is.na(value) ~ 0,
+  )) %>%
+  group_by(x06_01, t, time) %>% 
+  summarise(x06_04 = (sum(value))) %>% 
+  ungroup() %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(4, 5)
+
+db = a1 %>% 
+  left_join(a2, by = "id") %>% 
+  left_join(a3, by = "id") %>% 
+  left_join(a4, by = "id") %>% 
+  left_join(a5, by = "id") %>% 
+  pivot_longer(c(x09_, x20_:x06_04)) %>% 
+  group_by(id, t, time, x06_01) %>% 
+  summarise(demanda2 = sum(value, na.rm = T)) %>% 
+  ungroup()  %>% 
+  filter(!is.na(t))
+
+demo10 = db %>% 
+  mutate(var = "demanda2") %>% 
+  rename(value = demanda2) %>% 
+  select(id, var, value)
+
+base10 = db %>% 
+  mutate(var = "demanda2") %>% 
+  rename(value = demanda2) %>% 
+  group_by(t, var, time) %>% 
+  summarise(value = mean(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = "var",
+              values_from = "value") %>% 
+  mutate(id = paste(t, time, sep = "_")) %>% 
+  select(id, demanda2)
+```
+
+```{r message=FALSE, include = F}
+### Redistribución en el hogar
+a1 = pc %>% 
+  select(-t) %>% 
+  rename(t = T2) %>% 
+  mutate(var = str_sub(var, 1, 6)) %>% 
+  filter(var %in% c("x11_09","x12_09","x13_09","x14_09","x15_09","x16_09","x17_09","x18_09")) %>% 
+  mutate(value = case_when(
+    value == "No" ~ NA_real_,
+    value == "Sí, con apoyo de alguna otra persona" ~ 0,
+    value == "Sí, yo misma/o sin apoyo de alguna otra persona" ~ 1,
+    is.na(value) ~ NA_real_,
+  )) %>% 
+  filter(value %in% c(1, 0)) %>% 
+  count(x06_01, time, t, value) %>% 
+  pivot_wider(values_from = "n",
+              names_from = "value") %>% 
+  janitor::clean_names() %>% 
+  mutate(x1_1 = case_when(
+    is.na(x1) ~ 0,
+    T ~ x1
+  )) %>% 
+  mutate(x0_1 = case_when(
+    is.na(x0) ~ 0,
+    T ~ x0
+  )) %>% 
+  select(-x1, -x0) %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(4, 5, 6)
+
+a2 = pc %>% 
+  select(-t) %>% 
+  rename(t = T2) %>% 
+  mutate(var = str_sub(var, 1, 6)) %>% 
+  filter(var %in% c("x20_08","x21_08","x22_08","x23_08","x24_08","x25_08","x26_08","x27_08")) %>% 
+  mutate(value = case_when(
+    value == "No" ~ NA_real_,
+    value == "Sí, con apoyo de alguna otra persona" ~ 0,
+    value == "Sí, yo misma/o sin apoyo de alguna otra persona" ~ 1,
+    is.na(value) ~ NA_real_,
+  )) %>% 
+  filter(value %in% c(1, 0)) %>% 
+  count(x06_01, t, time, value) %>% 
+  pivot_wider(values_from = "n",
+              names_from = "value") %>% 
+  janitor::clean_names() %>% 
+  mutate(x1_2 = case_when(
+    is.na(x1) ~ 0,
+    T ~ x1
+  )) %>% 
+  mutate(x0_2 = case_when(
+    is.na(x0) ~ 0,
+    T ~ x0
+  )) %>% 
+  select(-x1, -x0) %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(4, 5, 6)
+
+a3 = pc %>% 
+  select(-t) %>% 
+  rename(t = T2) %>% 
+  mutate(var = str_sub(var, 1, 6)) %>% 
+  filter(var %in% c("x29_08","x30_08","x31_08","x32_08","x33_08","x34_08")) %>% 
+  mutate(value = case_when(
+    value == "No" ~ NA_real_,
+    value == "Sí, con apoyo de alguna otra persona" ~ 0,
+    value == "Sí, yo misma/o sin apoyo de alguna otra persona" ~ 1,
+    is.na(value) ~ NA_real_,
+  )) %>% 
+  filter(value %in% c(1, 0)) %>% 
+  count(x06_01, t, time, value) %>% 
+  pivot_wider(values_from = "n",
+              names_from = "value") %>% 
+  janitor::clean_names() %>% 
+  mutate(x1_3 = case_when(
+    is.na(x1) ~ 0,
+    T ~ x1
+  )) %>% 
+  mutate(x0_3 = case_when(
+    is.na(x0) ~ 0,
+    T ~ x0
+  )) %>% 
+  select(-x1, -x0) %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(4, 5, 6)
+
+a4 = pc %>% 
+  select(-t) %>% 
+  rename(t = T2) %>% 
+  mutate(var = str_sub(var, 1, 6)) %>% 
+  filter(var %in% c("x36_08","x37_08","x38_08","x39_08","x40_08","x41_08")) %>% 
+  mutate(value = case_when(
+    value == "No" ~ NA_real_,
+    value == "Sí, con apoyo de alguna otra persona" ~ 0,
+    value == "Sí, yo misma/o sin apoyo de alguna otra persona" ~ 1,
+    is.na(value) ~ NA_real_,
+  )) %>% 
+  filter(value %in% c(1, 0)) %>% 
+  count(x06_01, time, t, value) %>% 
+  pivot_wider(values_from = "n",
+              names_from = "value") %>% 
+  janitor::clean_names() %>% 
+  mutate(x1_4 = case_when(
+    is.na(x1) ~ 0,
+    T ~ x1
+  )) %>% 
+  mutate(x0_4 = case_when(
+    is.na(x0) ~ 0,
+    T ~ x0
+  )) %>% 
+  select(-x1, -x0)  %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(4, 5, 6)
+
+a5 = pc %>% 
+  select(-t) %>% 
+  rename(t = T2) %>% 
+  mutate(var = str_sub(var, 1, 6)) %>% 
+  filter(var %in% c("x06_04")) %>% 
+  mutate(value = case_when(
+    value == "No" ~ NA_real_,
+    value == "Sí, con apoyo de alguna otra persona" ~ 0,
+    value == "Sí, yo misma/o sin apoyo de alguna otra persona" ~ 1,
+    is.na(value) ~ NA_real_,
+  )) %>% 
+  filter(value %in% c(1, 0))  %>% 
+  count(x06_01, time, t, value) %>% 
+  pivot_wider(values_from = "n",
+              names_from = "value") %>% 
+  janitor::clean_names() %>% 
+  mutate(x1_5 = case_when(
+    is.na(x1) ~ 0,
+    T ~ x1
+  )) %>% 
+  mutate(x0_5 = case_when(
+    is.na(x0) ~ 0,
+    T ~ x0
+  )) %>% 
+  select(-x1, -x0) %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  select(4, 5, 6)
+
+db = pc %>% 
+  select(-t) %>%
+  rename(t = T2) %>%
+  filter(!is.na(t)) %>%
+  count(x06_01, t, time) %>% 
+  select(-n) %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_")) %>% 
+  left_join(a1, by = "id") %>% 
+  left_join(a2, by = "id") %>% 
+  left_join(a3, by = "id") %>% 
+  left_join(a4, by = "id") %>% 
+  left_join(a5, by = "id") %>% 
+  pivot_longer(-c(x06_01, t, time, id)) %>% 
+  mutate(value = case_when(
+    is.na(value) ~ 0,
+    T ~ value
+  )) %>% 
+  pivot_wider(names_from = "name",
+              values_from = "value") %>% 
+  mutate(a = x1_1+x1_2+x1_3+x1_4+x1_5,
+         b = x0_1+x0_2+x0_3+x0_4+x0_5) %>%  
+  mutate(c = a+b) %>% 
+  mutate(redistribucion2 = a/c) %>% 
+  mutate(redistribucion2 = case_when(
+    is.nan(redistribucion2) ~ 0,
+    T ~ redistribucion2
+  )) %>% 
+  select(1:4, redistribucion2) %>% 
+  filter(!is.na(t))
+
+demo11 = db %>% 
+  mutate(var = "redistribucion2") %>% 
+  rename(value = redistribucion2) %>% 
+  select(id, var, value)
+
+base11 = db %>% 
+  mutate(var = "redistribucion2") %>% 
+  rename(value = redistribucion2) %>% 
+  group_by(t, var, time) %>% 
+  summarise(value = mean(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = "var",
+              values_from = "value") %>% 
+  mutate(id = paste(t, time, sep = "_")) %>% 
+  select(id, redistribucion2)
+```
+
+```{r, include = F}
+### Trabajo no remunerado (sin cuidados)
+db = pc %>% 
+  select(-t) %>% 
+  rename(t = T2) %>% 
+  mutate(var = str_sub(var, 1, 6)) %>% 
+  filter(var %in% c("x52_01")) %>%
+  mutate(value = case_when(
+    value == "No" ~ 0,
+    value == "Sí, con apoyo de alguna otra persona" ~ 1,
+    value == "Sí, yo misma/o sin el apoyo de alguna otra persona" ~ 1,
+    is.na(value) ~ 0,
+  )) %>% 
+  group_by(x06_01, t, time) %>% 
+  summarise(trabajo1 = (sum(value))) %>% 
+  ungroup() %>% 
+  filter(!is.na(t)) %>% 
+  mutate(id = paste(x06_01, t, time, sep = "_")) 
+
+demo12 = db %>% 
+  mutate(var = "trabajo1") %>% 
+  rename(value = trabajo1) %>% 
+  select(id, var, value)
+
+base12 = db %>% 
+  mutate(var = "trabajo1") %>% 
+  rename(value = trabajo1) %>% 
+  group_by(t, var, time) %>% 
+  summarise(value = mean(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = "var",
+              values_from = "value") %>% 
+  mutate(id = paste(t, time, sep = "_")) %>% 
+  select(id, trabajo1)
+```
+
+```{r, include = F}
+base_2 = rbind(demo02, demo03, demo04, demo05, demo06, demo07, demo08, demo09, demo10, demo11, demo12) %>% 
+  pivot_wider(values_from = "value",
+              names_from = "var") %>% 
+  separate(id, c("x06_01", "t", "time")) %>% 
+  left_join(demo00, by = "x06_01") 
+
+db = base_2 %>% 
+  select(-x06_03, -x04_08, -x04_06) %>% 
+  pivot_longer(-c(x06_01, t, time, value_previos2, value_previos1, mean_previos1, mean_previos2, value_3, value_9)) %>% 
+  pivot_wider(names_from = "time",
+              values_from = "value") %>% 
+  janitor::clean_names()  %>% 
+  mutate(dif1 = x0-x1) %>% 
+  mutate(dif2 = x0-x2) %>% 
+  group_by(name) %>% 
+  mutate(sd1 = sd(dif1,na.rm = T)) %>% 
+  mutate(sd2 = sd(dif2,na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(sd3_1 = 3*sd1) %>% 
+  mutate(sd3_2 = 3*sd2)  %>% 
+  mutate(filter_1 = dif1 > sd3_1) %>% 
+  mutate(filter_2 = dif2 > sd3_2) %>% 
+  mutate(sd3__1 = -sd3_1) %>% 
+  mutate(sd3__2 = -sd3_2) %>% 
+  mutate(filter2_1 = dif1 < sd3__1) %>% 
+  mutate(filter2_2 = dif2 < sd3__2) %>%  
+  filter(filter_1 == F) %>% 
+  filter(filter_2 == F) %>% 
+  filter(filter2_1 == F) %>% 
+  filter(filter2_2 == F) %>% 
+  select(x06_01:x2) %>% 
+  rename(var = name) %>% 
+  pivot_longer(c(x0:x2)) %>% 
+  rename(time = name,
+         name = var) %>% 
+  mutate(time = str_replace_all(time, c("x" = ""))) %>% 
+  mutate(time = as.numeric(time)) %>% 
+  pivot_wider(names_from = "name",
+              values_from = "value")  
+
+base_2 = base_2 %>% 
+  mutate(value_previos = case_when(
+    time == 0 ~ 0,
+    time == 1 ~ value_previos1,
+    time == 2 ~ value_previos2
+  )) %>% 
+  mutate(value_month = case_when(
+    time == 0 ~ 0,
+    time == 1 ~ value_3,
+    time == 2 ~ value_9
+  )) %>% 
+  mutate(mean_previos = case_when(
+    time == 0 ~ 0,
+    time == 1 ~ mean_previos1,
+    time == 2 ~ mean_previos2
+  )) %>% 
+  select(-c(value_previos1:mean_previos2))
+
+
+db = db %>% 
+  mutate(value_previos = case_when(
+    time == 0 ~ 0,
+    time == 1 ~ value_previos1,
+    time == 2 ~ value_previos2
+  )) %>% 
+  mutate(value_month = case_when(
+    time == 0 ~ 0,
+    time == 1 ~ value_3,
+    time == 2 ~ value_9
+  )) %>% 
+  mutate(mean_previos = case_when(
+    time == 0 ~ 0,
+    time == 1 ~ mean_previos1,
+    time == 2 ~ mean_previos2
+  )) %>% 
+  select(-c(value_previos1:mean_previos2))
+```
+
+# Bienestar social
+## Percepción de cuidados (Zarit)
+Hipótesis: Las PC de una PM que reciben CLP en el CD tienen menor autopercepción de carga de cuidados en comparación con quienes cuidan a una PM que no asisten al centro de día.
+
+```{r}
+db = db %>% 
+  rename(value = zarit)
+
+db1 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_previos)
+
+db2 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = mean_previos)
+
+db3 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_month)
+```
+
+Las PC estudiadas (tanto quienes asisten al CD como quienes están en la lista de espera) tienen una media de autopercepción de carga de cuidados (medida con el Índice de Zarit) de `r round(mean(db$value[db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$time==1],na.rm=T), 2)` en el medio plazo, y de `r round(mean(db$value[db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que acuden al CD tiene una media `r round(mean(db$value[db$t==1&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==1&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==1&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que están en la lista de espera tienen una media `r round(mean(db$value[db$t==0&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==0&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==0&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6}
+db %>% 
+  group_by(t, time) %>% 
+  summarise(val = mean(value, na.rm = T),
+            n = n(), 
+            sd = sd(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(se = sd/sqrt(n)) %>% 
+  mutate(id = paste(t, time)) %>% 
+  ggplot(aes(y = val,
+             x = factor(time))) +
+  geom_line(aes(y = value,
+                x = factor(time),
+                group = x06_01),
+            inherit.aes = F,
+            size = 0.8, alpha = 0.1,
+            data = db) +
+  geom_line(aes(y = val,
+                x = factor(time),
+                group = t),
+            size = 2,
+            color = "#27564b") +
+  geom_point(size = 4,
+             color = "#27564b") +
+  geom_errorbar(aes(ymin = val-(1.96*se),
+                    ymax = val+(1.96*se)),
+                width=.2,
+                position=position_dodge(.9),
+                size = 0.8,
+                color = "#27564b") +
+  scale_x_discrete(labels = c("Línea base", "Medio plazo", "Largo plazo")) + 
+  facet_grid(~t, labeller = as_labeller(c("1" = "PM admitidas", "0" = "Lista de espera"))) + 
+  theme_minimal() +
+  scale_color_discrete() + 
+  labs(x = NULL,
+       y = "Cargas de cuidado (Zarit)\n")
+```
+
+```{r}
+db$x06_01 <- factor(db$x06_01)
+lm1 <- lmer(value ~ t * time + (1 | x06_01), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Cargas de cuidado (Zarit)",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+```{r}
+# Regresiones en objetos
+lm1 <- lmer(value ~ t * time + (1 | x06_01) + factor(x04_09), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Derechohabiencia IMSS","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Cargas de cuidado (Zarit)",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+## Actividades de cuidados
+### Realización de actividades 
+
+```{r}
+db = db %>% 
+  select(-value) %>% 
+  rename(value = demanda2)
+
+db1 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_previos)
+
+db2 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = mean_previos)
+
+db3 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_month)
+```
+
+La variable de realización de actividades es operacionalizada a partir de la suma de actividades en las que la PC respondió que atendía a alguna persona cuidada (adicional a la PM) en el hogar.  En este indicador, las PC estudiadas (tanto quienes asisten al CD como quienes están en la lista de espera) tienen una media de `r round(mean(db$value[db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$time==1],na.rm=T), 2)` en el medio plazo, y de `r round(mean(db$value[db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que acuden al CD tiene una media `r round(mean(db$value[db$t==1&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==1&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==1&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que están en la lista de espera tienen una media `r round(mean(db$value[db$t==0&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==0&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==0&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6}
+db %>% 
+  group_by(t, time) %>% 
+  summarise(val = mean(value, na.rm = T),
+            n = n(), 
+            sd = sd(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(se = sd/sqrt(n)) %>% 
+  mutate(id = paste(t, time)) %>% 
+  ggplot(aes(y = val,
+             x = factor(time))) +
+  geom_line(aes(y = value,
+                x = factor(time),
+                group = x06_01),
+            inherit.aes = F,
+            size = 0.8, alpha = 0.1,
+            data = db) +
+  geom_line(aes(y = val,
+                x = factor(time),
+                group = t),
+            size = 2,
+            color = "#27564b") +
+  geom_point(size = 4,
+             color = "#27564b") +
+  geom_errorbar(aes(ymin = val-(1.96*se),
+                    ymax = val+(1.96*se)),
+                width=.2,
+                position=position_dodge(.9),
+                size = 0.8,
+                color = "#27564b") +
+  scale_x_discrete(labels = c("Línea base", "Medio plazo", "Largo plazo")) + 
+  facet_grid(~t, labeller = as_labeller(c("1" = "PM admitidas", "0" = "Lista de espera"))) + 
+  theme_minimal() +
+  scale_color_discrete() + 
+  labs(x = NULL,
+       y = "Realización de actividades (cuidados)\n")
+```
+
+```{r}
+db$x06_01 <- factor(db$x06_01)
+lm1 <- lmer(value ~ t * time + (1 | x06_01), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Realización de actividades (cuidados)",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+```{r}
+# Regresiones en objetos
+lm1 <- lmer(value ~ t * time + (1 | x06_01) + factor(x04_09), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Derechohabiencia IMSS","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Realización de actividades (cuidados)",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+### Redistribución en el hogar 
+
+```{r}
+db = db %>% 
+  select(-value) %>% 
+  rename(value = redistribucion2)
+
+db1 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_previos)
+
+db2 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = mean_previos)
+
+db3 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_month)
+```
+
+La variable de redistribución en el hogar es operacionalizada a partir del cálculo del porcentaje de actividades realizadas por la PC sin la participación de alguna otra persona en el hogar.  En este indicador, las PC estudiadas (tanto quienes asisten al CD como quienes están en la lista de espera) tienen una media de `r round(mean(db$value[db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$time==1],na.rm=T), 2)` en el medio plazo, y de `r round(mean(db$value[db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que acuden al CD tiene una media `r round(mean(db$value[db$t==1&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==1&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==1&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que están en la lista de espera tienen una media `r round(mean(db$value[db$t==0&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==0&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==0&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6}
+db %>% 
+  group_by(t, time) %>% 
+  summarise(val = mean(value, na.rm = T),
+            n = n(), 
+            sd = sd(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(se = sd/sqrt(n)) %>% 
+  mutate(id = paste(t, time)) %>% 
+  ggplot(aes(y = val,
+             x = factor(time))) +
+  geom_line(aes(y = value,
+                x = factor(time),
+                group = x06_01),
+            inherit.aes = F,
+            size = 0.8, alpha = 0.1,
+            data = db) +
+  geom_line(aes(y = val,
+                x = factor(time),
+                group = t),
+            size = 2,
+            color = "#27564b") +
+  geom_point(size = 4,
+             color = "#27564b") +
+  geom_errorbar(aes(ymin = val-(1.96*se),
+                    ymax = val+(1.96*se)),
+                width=.2,
+                position=position_dodge(.9),
+                size = 0.8,
+                color = "#27564b") +
+  scale_x_discrete(labels = c("Línea base", "Medio plazo", "Largo plazo")) + 
+  facet_grid(~t, labeller = as_labeller(c("1" = "PM admitidas", "0" = "Lista de espera"))) + 
+  theme_minimal() +
+  scale_color_discrete() + 
+  labs(x = NULL,
+       y = "Redistribución de cuidados\n")
+```
+
+```{r}
+db$x06_01 <- factor(db$x06_01)
+lm1 <- lmer(value ~ t * time + (1 | x06_01), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Redistribución de cuidados",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+```{r}
+# Regresiones en objetos
+lm1 <- lmer(value ~ t * time + (1 | x06_01) + factor(x04_09), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Derechohabiencia IMSS","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Redistribución de cuidados",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+### Trabajo no remunerado (sin cuidados) 
+
+```{r}
+db = db %>% 
+  select(-value) %>% 
+  rename(value = trabajo1)
+
+db1 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_previos)
+
+db2 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = mean_previos)
+
+db3 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_month)
+```
+
+La variable trabajo no remunerado (sin considerar trabajo de cuidados) es operacionalizada a partir de la suma de actividades en esta categoría que son realizadas por la PC (de un total de 8 posibles). En este indicador, las PC estudiadas (tanto quienes asisten al CD como quienes están en la lista de espera) tienen una media de `r round(mean(db$value[db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$time==1],na.rm=T), 2)` en el medio plazo, y de `r round(mean(db$value[db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que acuden al CD tiene una media `r round(mean(db$value[db$t==1&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==1&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==1&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que están en la lista de espera tienen una media `r round(mean(db$value[db$t==0&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==0&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==0&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6}
+db %>% 
+  group_by(t, time) %>% 
+  summarise(val = mean(value, na.rm = T),
+            n = n(), 
+            sd = sd(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(se = sd/sqrt(n)) %>% 
+  mutate(id = paste(t, time)) %>% 
+  ggplot(aes(y = val,
+             x = factor(time))) +
+  geom_line(aes(y = value,
+                x = factor(time),
+                group = x06_01),
+            inherit.aes = F,
+            size = 0.8, alpha = 0.1,
+            data = db) +
+  geom_line(aes(y = val,
+                x = factor(time),
+                group = t),
+            size = 2,
+            color = "#27564b") +
+  geom_point(size = 4,
+             color = "#27564b") +
+  geom_errorbar(aes(ymin = val-(1.96*se),
+                    ymax = val+(1.96*se)),
+                width=.2,
+                position=position_dodge(.9),
+                size = 0.8,
+                color = "#27564b") +
+  scale_x_discrete(labels = c("Línea base", "Medio plazo", "Largo plazo")) + 
+  facet_grid(~t, labeller = as_labeller(c("1" = "PM admitidas", "0" = "Lista de espera"))) + 
+  theme_minimal() +
+  scale_color_discrete() + 
+  labs(x = NULL,
+       y = "Trabajo no remunerado (sin cuidados)\n")
+```
+
+```{r}
+db$x06_01 <- factor(db$x06_01)
+lm1 <- lmer(value ~ t * time + (1 | x06_01), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Trabajo no remunerado (sin cuidados)",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+```{r}
+# Regresiones en objetos
+lm1 <- lmer(value ~ t * time + (1 | x06_01) + factor(x04_09), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Derechohabiencia IMSS","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Trabajo no remunerado (sin cuidados)",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+## Case
+Hipótesis: Las PC de una PM que reciben CLP en el CD reportan menos niveles de violencia en comparación con quienes cuidan a una PM que no asiste al CD.
+```{r}
+db = db %>% 
+  select(-value) %>% 
+  rename(value = case)
+
+db1 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_previos)
+
+db2 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = mean_previos)
+
+db3 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_month)
+```
+
+Las PC estudiadas (tanto quienes asisten al CD como quienes están en la lista de espera) tienen una media de violencia (medida con CASE) de `r round(mean(db$value[db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$time==1],na.rm=T), 2)` en el medio plazo, y de `r round(mean(db$value[db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que acuden al CD tiene una media `r round(mean(db$value[db$t==1&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==1&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==1&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que están en la lista de espera tienen una media `r round(mean(db$value[db$t==0&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==0&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==0&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6}
+db %>% 
+  group_by(t, time) %>% 
+  summarise(val = mean(value, na.rm = T),
+            n = n(), 
+            sd = sd(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(se = sd/sqrt(n)) %>% 
+  mutate(id = paste(t, time)) %>% 
+  ggplot(aes(y = val,
+             x = factor(time))) +
+  geom_line(aes(y = value,
+                x = factor(time),
+                group = x06_01),
+            inherit.aes = F,
+            size = 0.8, alpha = 0.1,
+            data = db) +
+  geom_line(aes(y = val,
+                x = factor(time),
+                group = t),
+            size = 2,
+            color = "#27564b") +
+  geom_point(size = 4,
+             color = "#27564b") +
+  geom_errorbar(aes(ymin = val-(1.96*se),
+                    ymax = val+(1.96*se)),
+                width=.2,
+                position=position_dodge(.9),
+                size = 0.8,
+                color = "#27564b") +
+  scale_x_discrete(labels = c("Línea base", "Medio plazo", "Largo plazo")) + 
+  facet_grid(~t, labeller = as_labeller(c("1" = "PM admitidas", "0" = "Lista de espera"))) + 
+  theme_minimal() +
+  scale_color_discrete() + 
+  labs(x = NULL,
+       y = "Violencia (CASE)\n")
+```
+
+```{r}
+db$x06_01 <- factor(db$x06_01)
+lm1 <- lmer(value ~ t * time + (1 | x06_01), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Violencia (CASE)",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+```{r}
+# Regresiones en objetos
+lm1 <- lmer(value ~ t * time + (1 | x06_01) + factor(x04_09), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Derechohabiencia IMSS","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Violencia (CASE)",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+```
+
+# Bienestar psicológico
+## Bienestar subjetivo: EBS-8
+Hipótesis: Las PC de una PM que reciben CLP en el CD reportan mayor bienestar subjetivo en comparación con quienes cuidan a una PM que no asiste al CD.
+
+```{r}
+db = db %>% 
+  select(-value) %>% 
+  rename(value = ebs)
+
+db1 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_previos)
+
+db2 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = mean_previos)
+
+db3 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_month)
+```
+
+Las PC estudiadas (tanto quienes asisten al CD como quienes están en la lista de espera) tienen una media de bienestar subjetivo (medido con el EBS-8) de `r round(mean(db$value[db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$time==1],na.rm=T), 2)` en el medio plazo, y de `r round(mean(db$value[db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que acuden al CD tiene una media `r round(mean(db$value[db$t==1&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==1&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==1&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que están en la lista de espera tienen una media `r round(mean(db$value[db$t==0&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==0&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==0&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6}
+db %>% 
+  group_by(t, time) %>% 
+  summarise(val = mean(value, na.rm = T),
+            n = n(), 
+            sd = sd(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(se = sd/sqrt(n)) %>% 
+  mutate(id = paste(t, time)) %>% 
+  ggplot(aes(y = val,
+             x = factor(time))) +
+  geom_line(aes(y = value,
+                x = factor(time),
+                group = x06_01),
+            inherit.aes = F,
+            size = 0.8, alpha = 0.1,
+            data = db) +
+  geom_line(aes(y = val,
+                x = factor(time),
+                group = t),
+            size = 2,
+            color = "#27564b") +
+  geom_point(size = 4,
+             color = "#27564b") +
+  geom_errorbar(aes(ymin = val-(1.96*se),
+                    ymax = val+(1.96*se)),
+                width=.2,
+                position=position_dodge(.9),
+                size = 0.8,
+                color = "#27564b") +
+  scale_x_discrete(labels = c("Línea base", "Medio plazo", "Largo plazo")) + 
+  facet_grid(~t, labeller = as_labeller(c("1" = "PM admitidas", "0" = "Lista de espera"))) + 
+  theme_minimal() +
+  scale_color_discrete() + 
+  labs(x = NULL,
+       y = "Bienestar subjetivo (EBS-8)\n")
+```
+
+```{r}
+db$x06_01 <- factor(db$x06_01)
+lm1 <- lmer(value ~ t * time + (1 | x06_01), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Bienestar subjetivo (EBS-8)",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+```{r}
+# Regresiones en objetos
+lm1 <- lmer(value ~ t * time + (1 | x06_01) + factor(x04_09), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Derechohabiencia IMSS","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Bienestar subjetivo (EBS-8)",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+```
+
+## Depresión: CES-D
+Hipótesis: Las PC de una PM que reciben CLP en el CD reportan menores niveles de depresión  en comparación con quienes cuidan a una PM que no asiste al CD.
+
+```{r}
+db = db %>% 
+  select(-value) %>% 
+  rename(value = cesd)
+
+db1 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_previos)
+
+db2 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = mean_previos)
+
+db3 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_month)
+```
+
+Las PC estudiadas (tanto quienes asisten al CD como quienes están en la lista de espera) tienen una media de depresión (medida con CES-D) de `r round(mean(db$value[db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$time==1],na.rm=T), 2)` en el medio plazo, y de `r round(mean(db$value[db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que acuden al CD tiene una media `r round(mean(db$value[db$t==1&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==1&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==1&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que están en la lista de espera tienen una media `r round(mean(db$value[db$t==0&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==0&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==0&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6}
+db %>% 
+  group_by(t, time) %>% 
+  summarise(val = mean(value, na.rm = T),
+            n = n(), 
+            sd = sd(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(se = sd/sqrt(n)) %>% 
+  mutate(id = paste(t, time)) %>% 
+  ggplot(aes(y = val,
+             x = factor(time))) +
+  geom_line(aes(y = value,
+                x = factor(time),
+                group = x06_01),
+            inherit.aes = F,
+            size = 0.8, alpha = 0.1,
+            data = db) +
+  geom_line(aes(y = val,
+                x = factor(time),
+                group = t),
+            size = 2,
+            color = "#27564b") +
+  geom_point(size = 4,
+             color = "#27564b") +
+  geom_errorbar(aes(ymin = val-(1.96*se),
+                    ymax = val+(1.96*se)),
+                width=.2,
+                position=position_dodge(.9),
+                size = 0.8,
+                color = "#27564b") +
+  scale_x_discrete(labels = c("Línea base", "Medio plazo", "Largo plazo")) + 
+  facet_grid(~t, labeller = as_labeller(c("1" = "PM admitidas", "0" = "Lista de espera"))) + 
+  theme_minimal() +
+  scale_color_discrete() + 
+  labs(x = NULL,
+       y = "Depresión (CES-D)\n")
+```
+
+```{r}
+db$x06_01 <- factor(db$x06_01)
+lm1 <- lmer(value ~ t * time + (1 | x06_01), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Depresión (CES-D)",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+```{r}
+# Regresiones en objetos
+lm1 <- lmer(value ~ t * time + (1 | x06_01) + factor(x04_09), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Derechohabiencia IMSS","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Depresión (CES-D)",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+```
+
+# Bienestar económico y laboral
+## Obtención de ingresos (general)
+Hipótesis: Las PC de una PM que reciben CLP en el CD obtienen ingresos (de forma general) en mayor medida que quienes cuidan a una PM que no asiste al CD.
+```{r}
+db = db %>% 
+    select(-value) %>% 
+  rename(value = x04_10)
+
+db1 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_previos)
+
+db2 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = mean_previos)
+
+db3 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_month)
+```
+
+Entre todas las PC estudiadas (tanto quienes asisten al CD como quienes están en la lista de espera), un `r percent(mean(db$value[db$time==0],na.rm=T), .1)` contaba con ingresos propios en la línea base, un `r percent(mean(db$value[db$time==1],na.rm=T), .1)` en de la medición de medio plazo, y un `r percent(mean(db$value[db$time==2],na.rm=T), .1)` en la medición de largo plazo.
+
+Entre las PC que acuden al CD, un `r percent(mean(db$value[db$t==1&db$time==0],na.rm=T), .1)` contaba con ingresos propios en la línea base, un `r percent(mean(db$value[db$t==1&db$time==1],na.rm=T), .1)` en la medición de medio plazo, y un `r percent(mean(db$value[db$t==1&db$time==2],na.rm=T), .1)` en la medición de largo plazo.
+
+Entre las PC en la lista de espera, un `r percent(mean(db$value[db$t==0&db$time==0],na.rm=T), .1)` contaba con ingresos propios en la línea base, un `r percent(mean(db$value[db$t==0&db$time==1],na.rm=T), .1)` en la medición de medio plazo, y un `r percent(mean(db$value[db$t==0&db$time==2],na.rm=T), .1)` en la medición de largo plazo.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6}
+db %>% 
+  group_by(t, time) %>% 
+  summarise(val = mean(value, na.rm = T),
+            n = n(), 
+            sd = sd(value)) %>% 
+  ungroup() %>% 
+  mutate(se = sd/sqrt(n)) %>% 
+  mutate(id = paste(t, time)) %>% 
+  ggplot(aes(y = val,
+             x = factor(time))) +
+  geom_line(aes(y = val,
+                x = factor(time),
+                group = t),
+            size = 0.8) +
+  geom_point(size = 3) +
+  scale_y_continuous(label = percent_format()) + 
+  scale_x_discrete(labels = c("Línea base", "Medio plazo", "Largo plazo")) + 
+  facet_grid(~t, labeller = as_labeller(c("1" = "PM admitidas", "0" = "Lista de espera"))) + 
+  geom_errorbar(aes(ymin = val-(1.96*se),
+                    ymax = val+(1.96*se)),
+                width=.2,
+                position=position_dodge(.9),
+                size = 0.8) +
+  theme_minimal() +
+  scale_color_discrete() + 
+  labs(x = NULL,
+       y = "Ingresos propios\n")
+```
+
+```{r}
+# Regresiones en objetos
+lm1 <- glmer(value ~ t * time + (1 | x06_01), data = db, family = binomial)
+lm2 <- glmer(value ~ t1 * time + (1 | x06_01), data = db1, family = binomial)
+lm3 <- glmer(value ~ t1 * time + (1 | x06_01), data = db2, family = binomial)
+lm4 <- glmer(value ~ t1 * time + (1 | x06_01), data = db3, family = binomial)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Ingresos propios",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+```{r}
+# Regresiones en objetos
+lm1 <- glmer(value ~ t * time + (1 | x06_01) + factor(x04_09), data = db, family = binomial)
+lm2 <- glmer(value ~ t1 + time + (1 | x06_01) + factor(x04_09), data = db1, family = binomial)
+lm3 <- glmer(value ~ t1 + time + (1 | x06_01) + factor(x04_09), data = db2, family = binomial)
+lm4 <- glmer(value ~ t1 + time + (1 | x06_01) + factor(x04_09), data = db3, family = binomial)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Derechohabiencia IMSS","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Trabajo remunerado",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+## Nivel de ingresos
+Hipótesis: Las PC de una PM que reciben CLP en el CD reportan mejoras en sus niveles de ingreso en comparación con quienes cuidan a una PM que no asiste al CD.
+```{r}
+db = db %>% 
+  select(-value) %>% 
+  rename(value = x05_01)
+
+db1 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_previos)
+
+db2 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = mean_previos)
+
+db3 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_month)
+```
+
+Las PC estudiadas (tanto quienes asisten al CD como quienes están en la lista de espera) tienen una media de nivel de ingresos de `r round(mean(db$value[db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$time==1],na.rm=T), 2)` en el medio plazo, y de `r round(mean(db$value[db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que acuden al CD tiene una media `r round(mean(db$value[db$t==1&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==1&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==1&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que están en la lista de espera tienen una media `r round(mean(db$value[db$t==0&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==0&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==0&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6}
+db %>% 
+  group_by(t, time) %>% 
+  summarise(val = mean(value, na.rm = T),
+            n = n(), 
+            sd = sd(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(se = sd/sqrt(n)) %>% 
+  mutate(id = paste(t, time)) %>% 
+  ggplot(aes(y = val,
+             x = factor(time))) +
+  geom_line(aes(y = value,
+                x = factor(time),
+                group = x06_01),
+            inherit.aes = F,
+            size = 0.8, alpha = 0.1,
+            data = db) +
+  geom_line(aes(y = val,
+                x = factor(time),
+                group = t),
+            size = 2,
+            color = "#27564b") +
+  geom_point(size = 4,
+             color = "#27564b") +
+  geom_errorbar(aes(ymin = val-(1.96*se),
+                    ymax = val+(1.96*se)),
+                width=.2,
+                position=position_dodge(.9),
+                size = 0.8,
+                color = "#27564b") +
+  scale_x_discrete(labels = c("Línea base", "Medio plazo", "Largo plazo")) + 
+  facet_grid(~t, labeller = as_labeller(c("1" = "PM admitidas", "0" = "Lista de espera"))) + 
+  theme_minimal() +
+  scale_color_discrete() + 
+  labs(x = NULL,
+       y = "Nivel de ingresos\n")
+```
+
+```{r}
+db$x06_01 <- factor(db$x06_01)
+lm1 <- lmer(value ~ t * time + (1 | x06_01), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Nivel de ingresos",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+```{r}
+# Regresiones en objetos
+lm1 <- lmer(value ~ t * time + (1 | x06_01) + factor(x04_09), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Derechohabiencia IMSS","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Nivel de ingresos",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+```
+
+
+## Trabajo remunerado
+Hipótesis: Las PC de una PM que reciben CLP en el CD cuentan con un trabajo remunerado en mayor medida que quienes cuidan a una PM que no asiste al CD.
+```{r}
+db = db %>% 
+    select(-value) %>% 
+  rename(value = x52_02)
+
+db1 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_previos)
+
+db2 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = mean_previos)
+
+db3 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_month)
+```
+
+Entre todas las PC estudiadas (tanto quienes asisten al CD como quienes están en la lista de espera), un `r percent(mean(db$value[db$time==0],na.rm=T), .1)` tenía un trabajo remunerado antes de la línea base, un `r percent(mean(db$value[db$time==1],na.rm=T), .1)` en de la medición de medio plazo, y un `r percent(mean(db$value[db$time==2],na.rm=T), .1)` en la medición de largo plazo.
+
+Entre las PC que acuden al CD, un `r percent(mean(db$value[db$t==1&db$time==0],na.rm=T), .1)` tenía un trabajo remunerado de la línea base, un `r percent(mean(db$value[db$t==1&db$time==1],na.rm=T), .1)` en la medición de medio plazo, y un `r percent(mean(db$value[db$t==1&db$time==2],na.rm=T), .1)` en la medición de largo plazo.
+
+Entre las PC en la lista de espera, un `r percent(mean(db$value[db$t==0&db$time==0],na.rm=T), .1)` tenía un trabajo remunerado en la línea base, un `r percent(mean(db$value[db$t==0&db$time==1],na.rm=T), .1)` en la medición de medio plazo, y un `r percent(mean(db$value[db$t==0&db$time==2],na.rm=T), .1)` en la medición de largo plazo.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6}
+db %>% 
+  group_by(t, time) %>% 
+  summarise(val = mean(value, na.rm = T),
+            n = n(), 
+            sd = sd(value)) %>% 
+  ungroup() %>% 
+  mutate(se = sd/sqrt(n)) %>% 
+  mutate(id = paste(t, time)) %>% 
+  ggplot(aes(y = val,
+             x = factor(time))) +
+  geom_line(aes(y = val,
+                x = factor(time),
+                group = t),
+            size = 0.8) +
+  geom_point(size = 3) +
+  scale_y_continuous(label = percent_format()) + 
+  scale_x_discrete(labels = c("Línea base", "Medio plazo", "Largo plazo")) + 
+  facet_grid(~t, labeller = as_labeller(c("1" = "PM admitidas", "0" = "Lista de espera"))) + 
+  geom_errorbar(aes(ymin = val-(1.96*se),
+                    ymax = val+(1.96*se)),
+                width=.2,
+                position=position_dodge(.9),
+                size = 0.8) +
+  theme_minimal() +
+  scale_color_discrete() + 
+  labs(x = NULL,
+       y = "Trabajo remunerado\n")
+```
+
+```{r}
+# Regresiones en objetos
+lm1 <- glmer(value ~ t * time + (1 | x06_01), data = db, family = binomial)
+lm2 <- glmer(value ~ t1 * time + (1 | x06_01), data = db1, family = binomial)
+lm3 <- glmer(value ~ t1 * time + (1 | x06_01), data = db2, family = binomial)
+lm4 <- glmer(value ~ t1 * time + (1 | x06_01), data = db3, family = binomial)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Trabajo remunerado",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+```{r}
+# Regresiones en objetos
+lm1 <- glmer(value ~ t * time + (1 | x06_01) + factor(x04_09), data = db, family = binomial)
+lm2 <- glmer(value ~ t1 + time + (1 | x06_01) + factor(x04_09), data = db1, family = binomial)
+lm3 <- glmer(value ~ t1 + time + (1 | x06_01) + factor(x04_09), data = db2, family = binomial)
+lm4 <- glmer(value ~ t1 + time + (1 | x06_01) + factor(x04_09), data = db3, family = binomial)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Derechohabiencia IMSS","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Trabajo remunerado",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+## Horas remuneradas (todas las PC)
+Hipótesis: Las PC de una PM que reciben CLP en el CD trabajan más horas de forma remunerada en comparación de quienes cuidan a una PM que no asiste al CD.
+```{r}
+db = db %>% 
+  select(-value) %>% 
+  rename(value = x53_01)
+
+db1 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_previos)
+
+db2 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = mean_previos)
+
+db3 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_month)
+```
+
+Las PC estudiadas (tanto quienes asisten al CD como quienes están en la lista de espera) tienen una media de horas remuneradas de `r round(mean(db$value[db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$time==1],na.rm=T), 2)` en el medio plazo, y de `r round(mean(db$value[db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que acuden al CD tiene una media `r round(mean(db$value[db$t==1&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==1&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==1&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que están en la lista de espera tienen una media `r round(mean(db$value[db$t==0&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==0&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==0&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6}
+db %>% 
+  group_by(t, time) %>% 
+  summarise(val = mean(value, na.rm = T),
+            n = n(), 
+            sd = sd(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(se = sd/sqrt(n)) %>% 
+  mutate(id = paste(t, time)) %>% 
+  ggplot(aes(y = val,
+             x = factor(time))) +
+  geom_line(aes(y = value,
+                x = factor(time),
+                group = x06_01),
+            inherit.aes = F,
+            size = 0.8, alpha = 0.1,
+            data = db) +
+  geom_line(aes(y = val,
+                x = factor(time),
+                group = t),
+            size = 2,
+            color = "#27564b") +
+  geom_point(size = 4,
+             color = "#27564b") +
+  geom_errorbar(aes(ymin = val-(1.96*se),
+                    ymax = val+(1.96*se)),
+                width=.2,
+                position=position_dodge(.9),
+                size = 0.8,
+                color = "#27564b") +
+  scale_x_discrete(labels = c("Línea base", "Medio plazo", "Largo plazo")) + 
+  facet_grid(~t, labeller = as_labeller(c("1" = "PM admitidas", "0" = "Lista de espera"))) + 
+  theme_minimal() +
+  scale_color_discrete() + 
+  labs(x = NULL,
+       y = "Horas remuneradas\n")
+```
+
+```{r}
+db$x06_01 <- factor(db$x06_01)
+lm1 <- lmer(value ~ t * time + (1 | x06_01), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Horas remuneradas",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+```{r}
+# Regresiones en objetos
+lm1 <- lmer(value ~ t * time + (1 | x06_01) + factor(x04_09), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Derechohabiencia IMSS","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Horas remuneradas",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+```
+
+
+## Horas remuneradas (subgrupo: solo quienes han tenido trabajo remunerado)
+Hipótesis: Las PC de una PM que reciben CLP en el CD trabajan más horas de forma remunerada en comparación de quienes cuidan a una PM que no asiste al CD (considerando únicamente a las PC que han realizado trabajo remunerado en algún momento del estudio).
+
+```{r}
+db = db %>% 
+  group_by(x06_01) %>% 
+  mutate(filter = sum(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  filter(filter != 0)
+
+db1 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_previos)
+
+db2 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = mean_previos)
+
+db3 = db %>% 
+  select(-t) %>% 
+  mutate(t1 = value_month)
+```
+
+Las PC estudiadas que han tenido en algún momento un trabajo remunerado (tanto quienes asisten al CD como quienes están en la lista de espera) tienen una media de horas remuneradas de `r round(mean(db$value[db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$time==1],na.rm=T), 2)` en el medio plazo, y de `r round(mean(db$value[db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que acuden al CD tiene una media `r round(mean(db$value[db$t==1&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==1&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==1&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+Las PC que están en la lista de espera tienen una media `r round(mean(db$value[db$t==0&db$time==0],na.rm=T), 2)` en la línea base, de `r round(mean(db$value[db$t==0&db$time==1],na.rm=T), 2)` en la medición de medio plazo, y de `r round(mean(db$value[db$t==0&db$time==2],na.rm=T), 2)` en el largo plazo.
+
+```{r echo=FALSE, fig.height = 3, fig.width = 6}
+db %>% 
+  group_by(t, time) %>% 
+  summarise(val = mean(value, na.rm = T),
+            n = n(), 
+            sd = sd(value, na.rm = T)) %>% 
+  ungroup() %>% 
+  mutate(se = sd/sqrt(n)) %>% 
+  mutate(id = paste(t, time)) %>% 
+  ggplot(aes(y = val,
+             x = factor(time))) +
+  geom_line(aes(y = value,
+                x = factor(time),
+                group = x06_01),
+            inherit.aes = F,
+            size = 0.8, alpha = 0.1,
+            data = db) +
+  geom_line(aes(y = val,
+                x = factor(time),
+                group = t),
+            size = 2,
+            color = "#27564b") +
+  geom_point(size = 4,
+             color = "#27564b") +
+  geom_errorbar(aes(ymin = val-(1.96*se),
+                    ymax = val+(1.96*se)),
+                width=.2,
+                position=position_dodge(.9),
+                size = 0.8,
+                color = "#27564b") +
+  scale_x_discrete(labels = c("Línea base", "Medio plazo", "Largo plazo")) + 
+  facet_grid(~t, labeller = as_labeller(c("1" = "PM admitidas", "0" = "Lista de espera"))) + 
+  theme_minimal() +
+  scale_color_discrete() + 
+  labs(x = NULL,
+       y = "Horas remuneradas (subgrupo)\n")
+```
+
+```{r}
+db$x06_01 <- factor(db$x06_01)
+lm1 <- lmer(value ~ t * time + (1 | x06_01), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Horas remuneradas (subgrupo)",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+
+```
+
+```{r}
+# Regresiones en objetos
+lm1 <- lmer(value ~ t * time + (1 | x06_01) + factor(x04_09), data = db)
+lm2 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db1)
+lm3 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db2)
+lm4 <- lmer(value ~ t1 * time + (1 | x06_01) + factor(x04_09), data = db3)
+```
+
+```{r warning=FALSE, message=FALSE, comment = ''}
+# Regresiones
+stargazer(model.numbers = F,
+          notes.label = "Nota",
+          covariate.labels = c("Tratamiento","Tiempo","Derechohabiencia IMSS","Tratamiento*Tiempo", "Constante"),
+          dep.var.caption = "Horas remuneradas (subgrupo)",
+          lm1, lm2, lm3, lm4,
+          type = "text",
+          dep.var.labels = c(""),
+          column.labels =  c("Categórica", "Previos", "Previos (prom.)", "Meses previos (3-9)"),
+          align = TRUE,
+          no.space = TRUE)
+```
