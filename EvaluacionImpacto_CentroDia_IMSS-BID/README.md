@@ -22,4 +22,4 @@ Las bases y código se encuentran en un proceso de depuración para una mayor fa
 Asimismo, se encuentran en proceso de elaboración una serie de artículos académicos y reportes.
 
 ## Contacto
-Ppara cualquier comunicación, favor de mandar un correo a pablodeloscobos (gmail). 
+Para cualquier comunicación, favor de mandar un correo a pablodeloscobos (gmail).
