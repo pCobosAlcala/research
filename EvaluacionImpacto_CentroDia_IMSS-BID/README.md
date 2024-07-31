@@ -1,4 +1,4 @@
-# Repositorio de bases de datos y código utilizado para el proyecto "Evaluación de impacto del primer Centro de Día paradel IMSS en el bienestar de las personas mayores y las personas cuidadoras"
+# Repositorio de bases de datos y código utilizado para el proyecto "Evaluación de impacto del primer Centro de Día del IMSS en el bienestar de las personas mayores y las personas cuidadoras"
 
 Autores: Guillermo M. Cejudo, Cynthia L. Michel y Pablo de los Cobos
 
@@ -10,7 +10,8 @@ Este repositorio contiene tres bases de datos utilizadas para el cálculo del im
 - db_dupla.xlxs (esta base de datos contiene información sobr las duplas que participaron en el proceso)
 
 ## Bases de datos
-Adicionalmente, este repositorio contiene el código empleado para el análisis. El código está diseñado para generar un reporte en RMarkdown para cada una de las poblaciones.
+Adicionalmente, este repositorio contiene el código empleado para el análisis. El código está diseñado para generar un reporte en RMarkdown para cada una de las poblaciones:
+
 - analisis_pm.Rmd (código de análisis para personas mayores)
 - analisis_pc.Rmd (código de análisis para personas cuidadoras)
 
